@@ -14,7 +14,7 @@ import math
 # settings
 # This is where you modify the settings for a test print
 # At terms this should be moved in a json set-up file
-setupData = {
+setupData = { 
     "DryRun":         False,   # If DryRun true, do not extrude the wire
     "MaxZ":           320.0,   # (mm) Height of the machine 
     "PrintRadius":    300.0,   # (mm) Printable radius 
