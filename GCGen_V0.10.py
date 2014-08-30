@@ -9,6 +9,7 @@ Simple tool to generate GCode adapted to perform tests with the StrongPrint 3DPr
 ChangeLog:
 - V0.7: Added DryRun option
 - V0.9: Adapted to automatic ignition
+- V0.10: Included Extrudeur testing
 """
 import math
 
