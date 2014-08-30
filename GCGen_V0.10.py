@@ -8,23 +8,26 @@ Simple tool to generate GCode adapted to perform tests with the StrongPrint 3DPr
 
 ChangeLog:
 - V0.7: Added DryRun option
+- V0.9: Adapted to automatic ignition
 """
 import math
 
 # settings
 # This is where you modify the settings for a test print
 # At terms this should be moved in a json set-up file
-setupData = { 
-    "DryRun":         False,   # If DryRun true, do not extrude the wire
-    "MaxZ":           320.0,   # (mm) Height of the machine 
-    "PrintRadius":    300.0,   # (mm) Printable radius 
-    "Z0":               5.55,   # (mm) correction of the zero
-    "WeldHeight":       1.9,   # (mm) distance between weld tip & part
-    "ApproachHeight":  10.0,   # (mm) safe height for approach
-    "TravelHeight":     5.0,   # (mm) safe height for travel with arc
+setupData = {
+    "Mode":          "Weld",   # (Str) If Mode set to "Weld" perform welding job, if "TestExtrude" perform extrusion test without welding
+    "DryRun":         False,   # (Bol) If DryRun true, do not extrude the wire
+    "MaxZ":           320.0,   # (mm)  Height of the machine 
+    "PrintRadius":    300.0,   # (mm)  Printable radius 
+    "Z0":              50.0,   # (mm)  correction of the zero
+    "WeldHeight":       2.2,   # (mm)  distance between weld tip & part
+    "ApproachHeight":  10.0,   # (mm)  safe height for approach
+    "TravelHeight":     5.0,   # (mm)  safe height for travel with arc
+    "layerWait"  :     20.0,   # (s)   Time to wait between layers
     
-    "ColdWeldSpeed":   30.0,   # (mm/min) speed while welding
-    "WeldSpeedHot":     0.5,   # (-) ratio of hot weld speed to cold
+    "ColdWeldSpeed":   60.0,   # (mm/min) speed while welding
+    "WeldSpeedHot":     0.4,   # (-) ratio of hot weld speed to cold
     "HotLength":       40.0,   # (mm) length over which the speed ratio is varied
     "WeldSpeedUp":      0.5,   # (%/s)  percentage of speed increase per seconds for welding
     "TravelSpeed":   5000.0,   # (mm/min) travel speed 
@@ -33,17 +36,19 @@ setupData = {
     
     "Acceleration":   100.0,   # (mm/s^2) Default Acceleration for the machine
     
-    "PuddleTime":       2.5,   # (s) Time stationary to create the weld puddle
-    "ExtrusionFactor":  0.8,   # (-) Multiplier of filament extruded over length
-    "RetractionLen":    1.4,   # (mm)
-    "Retractionfactor": 1.005, # (mm) disymetry between retract & extrude
-    "RetractionPlay":   1.8,   # (mm)
+    "PuddleTime":       3.0,   # (s) Time stationary to create the weld puddle
+    "ExtrusionFactor":  1.0,   # (-) Multiplier of filament extruded over length
+    "RetractionLen":    0.6,   # (mm)
+    "Retractionfactor": 1.007, # (mm) disymetry between retract & extrude
+    "RetractionPlay":   0.6,   # (mm)
     "RetractionTravel": 0.15,  # (mm)
     
+    "NExtrude":       100,     # (-) number of extrudes/retract to be performed in the extrusion test
+
     
     "GCodeFileName": "AUTO.gcode",   # The output file name
     
-    "IgnitCoord": { "x":-50.0, "y":15.0, "len": 30.0 },  # initial coordinates
+    "IgnitCoord": { "x":-30.0, "y":15.0, "len": 30.0 },  # initial coordinates
  }
       
 workData = {    # not used yet
@@ -131,15 +136,15 @@ def printSegment(X1, Y1, X2, Y2):
         ex  = 0.0
     else:
         ret = setupData["RetractionLen"] + setupData["RetractionPlay"]
-        ex  = ret*setupData["Retractionfactor"] + 2*dl * setupData["ExtrusionFactor"]  # calculate extrusion to perform
+        ex  = ret*setupData["Retractionfactor"]  + 2*dl * setupData["ExtrusionFactor"]  # calculate extrusion to perform
 
     for i in range(0, steps):
         l += math.sqrt(dXi**2 + dYi**2)
         setupData["WeldSpeed"] = setupData["ColdWeldSpeed"] + setupData["ColdWeldSpeed"] * setupData["WeldSpeedHot"] * min(l/setupData["HotLength"] , 1)
         print "WS:%f" % setupData["WeldSpeed"]
-        E += ex
+        E        += ex
         printSeg += move( e=E, speed="Travel", comment="Weld"   )
-        E += -ret
+        E        += -ret
         printSeg += move( e=E, speed="Travel", comment="Retract")
         printSeg += move( x=lastPoint["x"] + dXi, y=lastPoint["y"] + dYi,  speed="Weld", comment="Move"   )
     print "l:%f" % l
@@ -165,65 +170,41 @@ def startSequence():
     print "  ### startSequence() ###"
     startSeq  = "; Initialisation Sequence \nG21    ; Set units to millimeters \nG28    ; Home all axes \nG90    ; Use absolute coordinates \nG92 E0 ; Reset extrusion distance \nM82    ; Use absolute distances for extrusion\n"
     startSeq += "M204 S" + str(setupData["Acceleration"]) + " ; Set the default Acceleration\n" 
-    x   = setupData["IgnitCoord"]["x"]
-    y   = setupData["IgnitCoord"]["y"]
-    zAp = setupData["ApproachHeight"]
-    zWe = setupData["WeldHeight"]
-    z0  = setupData["Z0"]
-    Len = setupData["IgnitCoord"]["len"]
-    startSeq += move( x=x-Len, y=y, z=z0+zAp, speed="Travel", comment="Ignition prepare" )
-    startSeq += move( x=x,          z=z0,     speed="Travel", comment="Ignition point"   )
-    startSeq += move( x=x+Len,      z=z0+zWe, speed="Travel", comment="Go to weld height")
-    startSeq += "G4 P" + str(int(setupData["PuddleTime"  ]*1000.0)) + " ; Wait to create weld puddle\n"
+    startSeq += move( z=100, speed="Travel", comment="Position Torch for ignition")
+    #startSeq += "M3     ; ignition of arc\n"
     return startSeq
 
 # The actual printing sequence  ######## TO be modified acording to your needs #######
 # 
-def printSequenceWALL():
-    print "  ### printSequence() ###"
-    global E
-    global setupData
-    x         = setupData["IgnitCoord"]["x"] + 20
-    y         = setupData["IgnitCoord"]["y"] + 0
-    E         = 0.0   # initialise extrusion distance
-    printSeq  = "; Welding starts\n"
-    # loop for each layers [speed, puddle time]
-    for s in [[100, 2.5], [150, 0.5], [175, 0.5], [200, 0.0], [225, 0.0], [250, 0.0], [250, 0.0], [250, 0.0], [250, 0.0], [250, 0.0]]:
-        setupData["WeldSpeed" ] = s[0]     # Set the print speed
-        setupData["PuddleTime"] = s[1]     # Set the puddle time
-        li        = line(x, y, 100,150)    # print a line
-        #li        = circle(x, y, 50, 40)   # Print a circle
-        printSeq += "; Puddle = " + str(s[1]) + "s \tSpeed = " + str(s[0]) + "mm/min\n"    # Comment for the GCode
-        printSeq += printSegments(li)       # generate the GCode
-        #y += -10
-        #x +=  -5
-        setupData["Z0"] += 0.7              # Change layer increment Z position
-        printSeq += move( x=0, y=20, z=setupData["Z0"] + setupData["TravelHeight"], speed="Travel", comment="next layer" )  # Move to next layer
-    return printSeq
-
 def printSequence():
     print "  ### printSequence() ###"
     global E
     global setupData
-    x         = setupData["IgnitCoord"]["x"] + 20
+    x         = setupData["IgnitCoord"]["x"] + 80
     y         = setupData["IgnitCoord"]["y"] + 0
     E         = 0.0   # initialise extrusion distance
     printSeq  = "; Welding starts\n"
     # loop for each layers [speed, puddle time]
-    for s in [[ 60, 2.0, 0]]: #, [ 80, 1.5, 20], [100, 1.5, 40], [100, 1.5, 60]]:
-        #setupData["ColdWeldSpeed" ] = s[0]     # Set the print speed
-        #setupData["PuddleTime"    ] = s[1]     # Set the puddle time
+    for s in [[ 0, 3.0, 0], [ 0.5, 2.0, 20], [1, 1.5, 40], [1.5, 1.5, 60]]:
+        setupData["Z0"        ] = s[0]                          # Change layer increment Z position
+        setupData["PuddleTime"] = s[1]                          # Set the puddle time
+        x                       = 0.0 + s[2]
         print "Set WS to:%f" % setupData["ColdWeldSpeed" ]
-        x = 25 + s[2]
-        li        = line(x, y, 65, 90)    # print a line
-        #li        = circle(x, y, 50, 40)   # Print a circle
-        printSeq += "; Puddle = " + str(s[1]) + "s \tSpeed = " + str(s[0]) + "mm/min \tdY = " + str(s[2]) + "\n"    # Comment for the GCode
-        printSeq += printSegments(li)       # generate the GCode
+
+        li        = line(x, y, 50, 90)                          # print a line
+        #li        = circle(x, y, 50, 40)                       # Print a circle
+        printSeq += move( x=setupData["IgnitCoord"]["x"],      y=setupData["IgnitCoord"]["y"], speed="Travel", comment="Position Torch for ignition")
+        print "Position Torch for ignition"
+        printSeq += "M3;          Ignition of arc\n"
+        printSeq += "; Puddle = " + str(setupData["PuddleTime"]) + "s \tSpeed = " + str(s[0]) + "mm/min \tdY = " + str(s[2]) + "\n"        # Comment for the GCode
+        printSeq += printSegments(li)                           # generate the GCode
+        printSeq += move( x=lastPoint["x"] + 50.0,      z=lastPoint["z"] + 50.0, speed="Travel", comment="Break Ark")
+        printSeq += "G4 P" + str(int(setupData["layerWait"  ]*1000.0)) + " ; Wait between layers to cool down\n"
+
         #y += -10
         #x +=  -5
         #setupData["Z0"] += 0.7              # Change layer increment Z position
         #printSeq += move( x=0, y=20, z=setupData["Z0"] + setupData["TravelHeight"], speed="Travel", comment="next layer" )  # Move to next layer
-        printSeq += move( z=setupData["Z0"] + setupData["TravelHeight"], speed="Travel", comment="next layer" )  # Move to next layer
     return printSeq
 
 # The stopping sequance to break the ark & return home
@@ -233,6 +214,27 @@ def stopSequence():
     stopSeq += move( x=lastPoint["x"] + 50.0,      z=lastPoint["z"] + 50.0, speed="Travel", comment="Break Ark")
     stopSeq += "G28 X0  ; home X axis\n"
     return stopSeq
+
+# The Extrude testing sequence to verify extrusion parameters without welding
+def testExtrudeSequence():
+    print "  ### testExtrudeSequence( ) ###"
+    global E
+    global setupData
+    E        = 0.0   # initialise extrusion distance
+    ret      = setupData["RetractionLen"] + setupData["RetractionPlay"]
+    ex       = ret*setupData["Retractionfactor"] + 2*setupData["RetractionTravel"] * setupData["ExtrusionFactor"]  # calculate extrusion to perform
+    print "ex :%f" % ex
+    print "ret:%f" % ret
+
+    testSeq  = "; Extrusion Test Starts\n"
+    for i in range(0, setupData["NExtrude"]):        
+        E       +=  ex
+        testSeq +=  move( e=E, speed="Travel", comment="Weld"   )
+        testSeq +=  "G4 P20\n"
+        E       += -ret
+        testSeq +=  move( e=E, speed="Travel", comment="Retract")
+        testSeq +=  "G4 P20\n"
+    return testSeq
 
 # Save data into a file
 def saveData(mydata, fileName):                     # save a string to a given filename
@@ -251,10 +253,13 @@ def saveData(mydata, fileName):                     # save a string to a given f
 # Main Code run all the sequences to generate the full gcode file & save it
 if __name__ == '__main__':  
     print "##### GCODE Tests Generator #####"
-    mydata = startSequence()
-    mydata += printSequence()
-    mydata += stopSequence()
-    #print mydata                                    # Display it on the screen
+    mydata  = startSequence()
+    if setupData["Mode"] == "Weld":
+        mydata += printSequence()
+        mydata += stopSequence()
+    elif setupData["Mode"] == "TestExtrude":
+        mydata += testExtrudeSequence()
+    print mydata                                    # Display it on the screen
     saveData(mydata, setupData["GCodeFileName"])     # Save it in the specified file
     
     
